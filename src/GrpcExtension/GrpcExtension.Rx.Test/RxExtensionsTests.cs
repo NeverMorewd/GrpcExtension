@@ -1,120 +1,152 @@
 using Grpc.Core;
 using GrpcExtension.Rx;
 using GrpcExtension.Rx.Test.Mocks;
-public class RxExtensionsTests
+using System.Reactive.Linq;
+using Xunit.Abstractions;
+
+namespace GrpcExtension.Rx.Test
 {
-    
-
-    [Fact]
-    public async Task Should_Emit_All_Items()
+    public class RxExtensionsTests
     {
-        // Arrange
-        var expected = new[] { 1, 2, 3, 4, 5 };
-        var reader = new MockAsyncStreamReader<int>(expected);
-        var actual = new List<int>();
-        var completed = false;
-        Exception? error = null;
-        var observer = new TestObserver<int>(
-            onNext: value => actual.Add(value),
-            onError: ex => error = ex,
-            onCompleted: () => completed = true
-        );
+        private readonly ITestOutputHelper _testOutputHelper;
+        public RxExtensionsTests(ITestOutputHelper testOutputHelper)
+        {
+            _testOutputHelper = testOutputHelper;
+        }
 
-        // Act
-        var observable = reader.MakeObservale();
-        var subscription = observable.Subscribe(observer);
-        await Task.Delay(100);
+        [Fact]
+        public async Task Should_Emit_All_Items()
+        {
+            var expected = new[] { 1, 2, 3, 4, 5 };
+            var reader = new MockAsyncStreamReader<int>(expected);
+            var actual = new List<int>();
+            var completed = false;
+            Exception? error = null;
+            var observer = new TestObserver<int>(
+                onNext: value => actual.Add(value),
+                onError: ex => error = ex,
+                onCompleted: () => completed = true
+            );
 
-        // Assert
-        Assert.Equal(expected, actual);
-        Assert.True(completed);
-        Assert.Null(error);
-    }
+            var observable = reader.MakeObservale();
+            var subscription = observable.Subscribe(observer);
+            await Task.Delay(100);
 
-    
+            Assert.Equal(expected, actual);
+            Assert.True(completed);
+            Assert.Null(error);
+        }
 
-    [Fact]
-    public async Task Should_Handle_Empty_Stream()
-    {
-        // Arrange
-        var reader = new MockAsyncStreamReader<int>(Array.Empty<int>());
-        var items = new List<int>();
-        var completed = false;
-        var observer = new TestObserver<int>(
-            onNext: value => items.Add(value),
-            onCompleted: () => completed = true
-        );
 
-        // Act
-        var observable = reader.MakeObservale();
-        var subscription = observable.Subscribe(observer);
-        await Task.Delay(100);
 
-        // Assert
-        Assert.Empty(items);
-        Assert.True(completed);
-    }
+        [Fact]
+        public async Task Should_Handle_Empty_Stream()
+        {
+            var reader = new MockAsyncStreamReader<int>(Array.Empty<int>());
+            var items = new List<int>();
+            var completed = false;
+            var observer = new TestObserver<int>(
+                onNext: value => items.Add(value),
+                onCompleted: () => completed = true
+            );
 
-    [Fact]
-    public async Task Should_Support_Multiple_Observers()
-    {
-        // Arrange
-        var expected = new[] { 1, 2, 3, 4, 5 };
-        var reader = new MockAsyncStreamReader<int>(expected);
+            var observable = reader.MakeObservale();
+            var subscription = observable.Subscribe(observer);
+            await observable.WaitForCompletionAsync();
 
-        var items1 = new List<int>();
-        var items2 = new List<int>();
-        var completed1 = false;
-        var completed2 = false;
+            Assert.Empty(items);
+            Assert.True(completed);
+        }
+        [Fact]
+        public async Task Performance_Multiple_Observers()
+        {
+            var expected = Enumerable.Range(0, 999);
+            var reader = new MockAsyncStreamReader<int>(expected);
+            var items = new List<int>();
+            var completeds = new List<bool>();
+            var factory = new ObserverFactory
+            {
+                TestOutput = _testOutputHelper
+            };
+            var observable = reader.MakeObservale();
+            foreach (var observer in factory.Observers)
+            {
+                observable
+                    .Subscribe(onNext: i =>
+                    {
+                        observer.OnNext(i);
+                        items.Add(i);
+                    },
+                    onError: e =>
+                    {
+                        observer.OnError(e);
+                    },
+                    onCompleted: () =>
+                    {
+                        observer.OnCompleted();
+                        completeds.Add(true);
+                    });
+            }
 
-        var observer1 = new TestObserver<int>(
-            onNext: value => items1.Add(value),
-            onCompleted: () => completed1 = true
-        );
+            await observable.WaitForCompletionAsync();
 
-        var observer2 = new TestObserver<int>(
-            onNext: value => items2.Add(value),
-            onCompleted: () => completed2 = true
-        );
+            Assert.Equal(factory.Observers.Count() * expected.Count(), items.Count);
+            Assert.Equal(completeds.Count, factory.Observers.Count());
+            Assert.True(completeds.All(c => c));
+        }
 
-        // Act
-        var observable = reader.MakeObservale();
-        var subscription1 = observable.Subscribe(observer1);
-        var subscription2 = observable.Subscribe(observer2);
+        [Fact]
+        public async Task Should_Handle_Errors()
+        {
+            var expectedException = new InvalidOperationException("Test error");
+            var target = Enumerable.Range(0, 9999);
+            var reader = new MockAsyncStreamReader<int>(target, expectedException);
+            var items = new List<int>();
+            Exception? error = null;
+            var observer = new TestObserver<int>(
+                onNext: value => items.Add(value),
+                onError: ex => error = ex
+            );
 
-        await Task.Delay(100);
+            var observable = reader.MakeObservale();
+            var subscription = observable.Subscribe(observer);
+            await observable.WaitForCompletionIgnoreErrorAsync();
 
-        // Assert
-        Assert.Equal(expected, items1);
-        Assert.Equal(expected, items2);
+            Assert.Equal(items.Count, target.Count());
+            Assert.NotNull(error);
+            Assert.Equal(expectedException, error);
+        }
 
-        Assert.True(completed1);
-        Assert.True(completed2);
+        [Theory]
+        [ClassData(typeof(ObserverFactory))]
+        public async Task Multiple_Observers(IObserver<int> observer)
+        {
+            var expected = Enumerable.Range(0, 99);
+            var reader = new MockAsyncStreamReader<int>(expected);
 
-        Assert.Equal(items1, items2);
-    }
+            var items = new List<int>();
+            var completed = false;
 
-    [Fact]
-    public async Task Should_Handle_Errors()
-    {
-        // Arrange
-        var expectedException = new InvalidOperationException("Test error");
-        var reader = new MockAsyncStreamReader<int>([1], expectedException);
-        var items = new List<int>();
-        Exception? error = null;
-        var observer = new TestObserver<int>(
-            onNext: value => items.Add(value),
-            onError: ex => error = ex
-        );
+            var observable = reader.MakeObservale();
+            var subscription1 = observable
+                .Subscribe(onNext: i =>
+                {
+                    observer.OnNext(i);
+                    items.Add(i);
+                },
+                onError: e =>
+                {
+                    observer.OnError(e);
+                },
+                onCompleted: () =>
+                {
+                    observer.OnCompleted();
+                    completed = true;
+                });
 
-        // Act
-        var observable = reader.MakeObservale();
-        var subscription = observable.Subscribe(observer);
-        await Task.Delay(100);
-
-        // Assert
-        Assert.Single(items);
-        Assert.NotNull(error);
-        Assert.Equal(expectedException, error);
+            await observable.WaitForCompletionAsync();
+            Assert.Equal(expected, items);
+            Assert.True(completed);
+        }
     }
 }
