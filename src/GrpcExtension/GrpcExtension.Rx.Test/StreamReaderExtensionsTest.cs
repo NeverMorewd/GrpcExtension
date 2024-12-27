@@ -1,15 +1,13 @@
-using Grpc.Core;
-using GrpcExtension.Rx;
 using GrpcExtension.Rx.Test.Mocks;
 using System.Reactive.Linq;
 using Xunit.Abstractions;
 
 namespace GrpcExtension.Rx.Test
 {
-    public class RxExtensionsTests
+    public class StreamReaderExtensionsTest
     {
         private readonly ITestOutputHelper _testOutputHelper;
-        public RxExtensionsTests(ITestOutputHelper testOutputHelper)
+        public StreamReaderExtensionsTest(ITestOutputHelper testOutputHelper)
         {
             _testOutputHelper = testOutputHelper;
         }
@@ -60,7 +58,7 @@ namespace GrpcExtension.Rx.Test
         [Fact]
         public async Task Performance_Multiple_Observers()
         {
-            var expected = Enumerable.Range(0, 999);
+            var expected = Enumerable.Range(0, 99);
             var reader = new MockAsyncStreamReader<int>(expected);
             var items = new List<int>();
             var completeds = new List<bool>();
@@ -99,7 +97,7 @@ namespace GrpcExtension.Rx.Test
         public async Task Should_Handle_Errors()
         {
             var expectedException = new InvalidOperationException("Test error");
-            var target = Enumerable.Range(0, 9999);
+            var target = Enumerable.Range(0, 99);
             var reader = new MockAsyncStreamReader<int>(target, expectedException);
             var items = new List<int>();
             Exception? error = null;

@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "GrpcExtension.Rx.Benchmark": {
+      "commandName": "Project"
+    },
+    "Container (Dockerfile)": {
+      "commandName": "Docker"
+    }
+  }
+}

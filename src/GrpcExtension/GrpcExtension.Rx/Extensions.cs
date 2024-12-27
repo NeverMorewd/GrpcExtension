@@ -1,10 +1,10 @@
 ﻿using Grpc.Core;
-using GrpcExtension.Rx.Internal;
 using System;
 using System.Reactive.Disposables;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 
 namespace GrpcExtension.Rx
@@ -27,30 +27,109 @@ namespace GrpcExtension.Rx
         {
 
         }
-        public static IObservable<T> MakeSimpleObservale<T>(this IAsyncStreamReader<T> asyncStreamReader)
+        public static IObservable<T> MakeReplayObservale<T>(this IAsyncStreamReader<T> asyncStreamReader, int buffer)
         {
-            return new SimpleObservable<T>(async (observer) =>
-            {
-                try
-                {
-                    while (await asyncStreamReader.MoveNext(CancellationToken.None))
-                    {
-                        observer.OnNext(asyncStreamReader.Current);
-                    }
-                    observer.OnCompleted();
-                }
-                catch (Exception ex)
-                {
-                    observer.OnError(ex);
-                }
-            });
+            var subject = new ReplaySubject<T>(buffer);
+            return MakeObservableReaderCore(asyncStreamReader, subject);
         }
         public static IObservable<T> MakeObservale<T>(this IAsyncStreamReader<T> asyncStreamReader)
         {
-            var subject = new ReplaySubject<T>();
+            var subject = new Subject<T>();
+            return MakeObservableReaderCore(asyncStreamReader, subject);
+        }
+
+        public static Task WaitForCompletionAsync<T>(this IObservable<T> observable)
+        {
+            var tcs = new TaskCompletionSource<bool>();
+            var subscription = observable.Subscribe(
+                _ => { },
+                ex => tcs.SetException(ex),
+                () => tcs.SetResult(true));
+
+            return tcs.Task;
+        }
+        public static Task WaitForCompletionIgnoreErrorAsync<T>(this IObservable<T> observable)
+        {
+            var tcs = new TaskCompletionSource<bool>();
+            var subscription = observable.Subscribe(
+                _ => { },
+                ex => tcs.SetResult(false),
+                () => tcs.SetResult(true));
+
+            return tcs.Task;
+        }
+        public static IDisposable WriteTo<T>(this IAsyncStreamWriter<T> asyncStreamWriter, IObservable<T> observable)
+        {
+            var channel = Channel.CreateUnbounded<T>();
+            _ = Task.Factory.StartNew(async () =>
+            {
+                try
+                {
+                    await foreach (var item in channel.Reader.ReadAllAsync())
+                    {
+                        await asyncStreamWriter.WriteAsync(item);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine(ex.ToString());
+                }
+            }, creationOptions: TaskCreationOptions.LongRunning);
+
+            return observable.Subscribe(
+                onNext: item =>
+                { 
+                    channel.Writer.TryWrite(item); 
+                },
+                onError: error =>
+                {
+                    channel.Writer.Complete(error);
+                },
+                onCompleted: () =>
+                {
+                    channel.Writer.Complete();
+                });
+        }
+        public static IDisposable WriteTo<T>(this IAsyncStreamWriter<T> asyncStreamWriter, IObservable<T> observable, IObservable<T> onErrorResumeObservable)
+        {
+            var channel = Channel.CreateUnbounded<T>();
+            _ = Task.Factory.StartNew(async () =>
+            {
+                try
+                {
+                    await foreach (var item in channel.Reader.ReadAllAsync())
+                    {
+                        await asyncStreamWriter.WriteAsync(item);
+                    }
+                }
+                catch (Exception ex)
+                {
+
+                }
+            }, creationOptions: TaskCreationOptions.LongRunning);
+
+            return observable
+                .OnErrorResumeNext(onErrorResumeObservable)
+                .Subscribe(
+                onNext: item =>
+                {
+                    channel.Writer.TryWrite(item);
+                },
+                onError: error =>
+                {
+                    channel.Writer.Complete(error);
+                },
+                onCompleted: () =>
+                {
+                    channel.Writer.Complete();
+                });
+        }
+
+
+        private static IObservable<T> MakeObservableReaderCore<T>(IAsyncStreamReader<T> asyncStreamReader, ISubject<T> subject)
+        {
             var tcs = new TaskCompletionSource<bool>();
             var startedReading = 0;
-
             return Observable.Create<T>(observer =>
             {
                 if (Interlocked.CompareExchange(ref startedReading, 1, 0) == 0)
@@ -81,31 +160,6 @@ namespace GrpcExtension.Rx
                     Disposable.Create(() => { })
                 );
             });
-        }
-
-        public static Task WaitForCompletionAsync<T>(this IObservable<T> observable)
-        {
-            var tcs = new TaskCompletionSource<bool>();
-            var subscription = observable.Subscribe(
-                _ => { },
-                ex => tcs.SetException(ex),
-                () => tcs.SetResult(true));
-
-            return tcs.Task;
-        }
-        public static Task WaitForCompletionIgnoreErrorAsync<T>(this IObservable<T> observable)
-        {
-            var tcs = new TaskCompletionSource<bool>();
-            var subscription = observable.Subscribe(
-                _ => { },
-                ex => tcs.SetResult(true),
-                () => tcs.SetResult(true));
-
-            return tcs.Task;
-        }
-        public static void ToObservale<T>(this IAsyncStreamWriter<T> asyncStreamWriter)
-        {
-
         }
     }
 }
