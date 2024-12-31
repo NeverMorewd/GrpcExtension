@@ -23,7 +23,7 @@ namespace GrpcExtension.Rx
         {
             _channel = Channel.CreateUnbounded<T>(new UnboundedChannelOptions
             {
-                SingleReader = true,
+                SingleReader = false,
                 SingleWriter = false,
             });
             _asyncStreamWriter = asyncStreamWriter ?? throw new ArgumentNullException(nameof(asyncStreamWriter));

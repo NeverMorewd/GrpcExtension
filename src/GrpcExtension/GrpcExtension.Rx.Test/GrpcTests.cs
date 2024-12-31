@@ -35,7 +35,7 @@ namespace GrpcExtension.Rx.Test
         {
             // Arrange
             const int messageCount = 10;
-            const int subjectCount = 20;
+            const int subjectCount = 100;
             const int sendValue = 10;
             const int delayMs = 100;
             
@@ -99,7 +99,7 @@ namespace GrpcExtension.Rx.Test
 
                 var response = await responseTask;
 
-                int expectedTotal = messageCount * subjectCount * 10; // 每个消息值为10
+                int expectedTotal = messageCount * subjectCount * sendValue;
                 _outputHelper.WriteLine($"Response: {response.Value}");
                 Assert.Equal(expectedTotal, response.Value);
 
@@ -113,25 +113,6 @@ namespace GrpcExtension.Rx.Test
             {
                 _outputHelper.WriteLine($"Test failed with exception: {ex}");
                 throw;
-            }
-            finally
-            {
-                foreach (var subject in subjects)
-                {
-                    try
-                    {
-                        if (!subject.IsCompleted)
-                        {
-                            subject.Subject.OnCompleted();
-                        }
-                        subject.Subject.Dispose();
-                    }
-                    catch (Exception ex)
-                    {
-                        _outputHelper.WriteLine($"Error during subject cleanup: {ex}");
-                    }
-                }
-                cts.Dispose();
             }
         }
         [Fact]
