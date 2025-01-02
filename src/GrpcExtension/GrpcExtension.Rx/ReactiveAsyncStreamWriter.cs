@@ -13,20 +13,20 @@ namespace GrpcExtension.Rx
     {
         private readonly Channel<T> _channel;
         private readonly Task _writingTask;
-        private readonly IClientStreamWriter<T> _asyncStreamWriter;
+        private readonly IClientStreamWriter<T> _clientStreamWriter;
         private readonly CancellationTokenSource _cts;
         private readonly CancellationToken _cancellationToken;
         private IObservable<T> _source;
         private bool _isDisposed;
 
-        public ReactiveAsyncStreamWriter(IClientStreamWriter<T> asyncStreamWriter)
+        public ReactiveAsyncStreamWriter(IClientStreamWriter<T> clientStreamWriter)
         {
             _channel = Channel.CreateUnbounded<T>(new UnboundedChannelOptions
             {
-                SingleReader = false,
+                SingleReader = true,
                 SingleWriter = false,
             });
-            _asyncStreamWriter = asyncStreamWriter ?? throw new ArgumentNullException(nameof(asyncStreamWriter));
+            _clientStreamWriter = clientStreamWriter ?? throw new ArgumentNullException(nameof(clientStreamWriter));
             _source = new Subject<T>();
             _cts = new CancellationTokenSource();
             _cancellationToken = _cts.Token;
@@ -40,7 +40,7 @@ namespace GrpcExtension.Rx
                         if (_cancellationToken.IsCancellationRequested)
                             break;
 
-                        await _asyncStreamWriter.WriteAsync(item);
+                        await _clientStreamWriter.WriteAsync(item);
                     }
                 }
                 catch (OperationCanceledException)
@@ -55,7 +55,7 @@ namespace GrpcExtension.Rx
             }, _cancellationToken, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         }
 
-        public IClientStreamWriter<T> AsyncStreamWriter => _asyncStreamWriter;
+        public IClientStreamWriter<T> AsyncStreamWriter => _clientStreamWriter;
 
         public ReactiveAsyncStreamWriter<T> With(IObservable<T> observable)
         {

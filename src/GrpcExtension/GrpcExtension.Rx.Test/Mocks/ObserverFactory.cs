@@ -29,6 +29,29 @@ namespace GrpcExtension.Rx.Test.Mocks
                     });
             });
         }
+        public ObserverFactory(int count)
+        {
+            _observers = Enumerable.Range(0, count).Select(index =>
+            {
+                return new TestObserver<int>(
+                    key: index.ToString(),
+                    onNext: i =>
+                    {
+                        Console.WriteLine($"{index}:{i}");
+                        TestOutput?.WriteLine($"{index}:{i}");
+                    },
+                    onError: e =>
+                    {
+                        Console.WriteLine($"{index}:{e}");
+                        TestOutput?.WriteLine($"{index}:{e}");
+                    },
+                    onCompleted: () =>
+                    {
+                        Console.WriteLine($"{index}:onCompleted");
+                        TestOutput?.WriteLine($"{index}:onCompleted");
+                    });
+            });
+        }
         public IEnumerator<object[]> GetEnumerator()
         {
             return _observers.Select(ob => new object[] { ob }).GetEnumerator();

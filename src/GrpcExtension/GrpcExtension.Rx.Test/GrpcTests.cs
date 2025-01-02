@@ -2,13 +2,16 @@
 using GrpcExtension.Rx.Test.Mocks;
 using GrpcExtension.Rx.Test.Mocks.Grpc;
 using Microsoft.VisualStudio.TestPlatform.Utilities;
+using Moq;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reactive.Subjects;
+using System.Reflection.PortableExecutable;
 using System.Text;
 using System.Threading.Tasks;
 using Xunit.Abstractions;
+using Xunit.Sdk;
 
 namespace GrpcExtension.Rx.Test
 {
@@ -116,36 +119,48 @@ namespace GrpcExtension.Rx.Test
             }
         }
         [Fact]
-        public async Task ClientStreamingAsyncTest()
-        {
-            using var channelContext = _grpcContextFactory.Create(_outputHelper);
-            var call = channelContext.Client.ClientStreaming();
-
-
-            var tasks = Enumerable.Range(1, 10).Select(i => 
-            {
-                return call.RequestStream.WriteAsync(new RequestMessage 
-                {
-                    Value = i,
-                });
-            });
-
-            // Act
-            foreach (var item in tasks)
-            {
-                await item;
-            }
-            await call.RequestStream.CompleteAsync();
-            var response = await call;
-            Assert.Equal(55, response.Value);
-        }
-        [Fact]
         public async Task ServerStreamingAsync()
         {
+            const int observerCount = 100;
+            const int requestValue = 200;
+            var items = new List<int>();
+            var completeds = new List<bool>();
             using var channelContext = _grpcContextFactory.Create(_outputHelper);
-            var response = await channelContext.Client.SimpleUnaryAsync(new RequestMessage { Value = 10 });
-            Assert.Equal(10, response.Value);
-            Assert.True(channelContext.Service.SimplyUnaryCalled);
+            using var call = channelContext.Client.ServerStreaming(new RequestMessage { Value = requestValue });
+            var streamingReaderObservable = call.ResponseStream.MakeObservale();
+
+            var factory = new ObserverFactory(observerCount)
+            {
+                TestOutput = _outputHelper
+            };
+            foreach (var observer in factory.Observers)
+            {
+                streamingReaderObservable
+                    .Subscribe(onNext: i =>
+                    {
+                        observer.OnNext(i.Value);
+                        items.Add(i.Value);
+                    },
+                    onError: e =>
+                    {
+                        observer.OnError(e);
+                    },
+                    onCompleted: () =>
+                    {
+                        observer.OnCompleted();
+                        completeds.Add(true);
+                    });
+            }
+
+            await streamingReaderObservable.WaitForCompletionAsync();
+            var groups = items.GroupBy(i => i).ToList();
+            Assert.Equal(requestValue, groups.Count);
+            foreach (var group in groups)
+            {
+                Assert.Equal(observerCount, group.Count());
+                Assert.True(group.All(i=>i == group.Key));
+            }
+            Assert.True(completeds.All(c => c));
         }
     }
 }
